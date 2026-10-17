@@ -63,7 +63,7 @@
       <h2 class="panel-title">استیکرها و دسته‌بندی</h2>
       <p class="panel-desc">
         برای هر استیکر اسم واضح بگذار (بدون کلمهٔ «استیکر»)،
-        تا ۸ دسته از لیست سایت انتخاب کن، و در صورت نیاز یادداشت سئو بنویس.
+        تا ۸ دسته انتخاب کن، یادداشت سئو (اجباری) و در صورت نیاز یادداشت برای گیکتوری بنویس.
       </p>
       <div class="sticker-list" id="stickerList">
         <div class="empty-state" id="emptyStickers">
@@ -90,7 +90,11 @@
         </li>
         <li class="check-item">
           <div class="check-icon wait" id="chk-cats">–</div>
-          <span>دسته‌ها از لیست سایت انتخاب شده‌اند (یا خالی با یادداشت)</span>
+          <span>دسته‌ها از لیست سایت انتخاب شده‌اند (یا خالی با یادداشت گیکتوری)</span>
+        </li>
+        <li class="check-item">
+          <div class="check-icon wait" id="chk-seo">–</div>
+          <span>یادداشت سئو برای همهٔ استیکرها پر شده (اجباری)</span>
         </li>
         <li class="check-item">
           <div class="check-icon wait" id="chk-png">–</div>
@@ -107,6 +111,34 @@
       <button class="btn-secondary" id="btnClear" type="button">پاک کردن همه</button>
     </div>
   </main>
+
+  <!-- Category Modal -->
+  <div class="modal-backdrop" id="catModal" aria-hidden="true">
+    <div class="modal" role="dialog" aria-labelledby="catModalTitle">
+      <div class="modal-header">
+        <div class="modal-header-top">
+          <h3 class="modal-title" id="catModalTitle">انتخاب دسته‌ها</h3>
+          <button type="button" class="modal-close" id="catModalClose" aria-label="بستن">×</button>
+        </div>
+        <div class="modal-search-wrap">
+          <input type="text" class="modal-search" id="catModalSearch" placeholder="جستجو بین ۳۳۷ دسته…" autocomplete="off" />
+          <span class="modal-search-icon">⌕</span>
+        </div>
+      </div>
+      <div class="modal-meta">
+        <span id="catModalCount"><strong>0</strong> از ۸ انتخاب شده</span>
+        <span id="catModalFiltered"></span>
+      </div>
+      <div class="modal-selected-strip" id="catModalSelected"></div>
+      <div class="modal-body">
+        <div class="modal-grid" id="catModalGrid"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-secondary" id="catModalClear">پاک کردن</button>
+        <button type="button" class="btn-primary" id="catModalDone">تأیید</button>
+      </div>
+    </div>
+  </div>
 
   <div class="toast" id="toast"></div>
 
@@ -168,7 +200,7 @@
   // ═══════════════════════════════════════════════════
   // State
   // ═══════════════════════════════════════════════════
-  /** @type {{id:string, file:File, name:string, cats:string[], note:string, preview:string}[]} */
+  /** @type {{id:string, file:File, name:string, cats:string[], note:string, geektoryNote:string, preview:string}[]} */
   let stickers = [];
   let nextId = 1;
 
@@ -233,9 +265,10 @@
     const hasFiles = stickers.length > 0;
     const allNamesOk = hasFiles && stickers.every(s => validateName(s.name, s.id).ok);
     const catsOk = hasFiles && stickers.every(s => {
-      if (s.cats.length === 0) return true; // empty allowed with note
+      if (s.cats.length === 0) return true;
       return s.cats.every(c => CATEGORY_SET.has(c)) && s.cats.length <= 8;
     });
+    const seoOk = hasFiles && stickers.every(s => (s.note || "").trim().length > 0);
 
     const steps = document.querySelectorAll(".progress-step");
     steps.forEach(el => {
@@ -243,7 +276,7 @@
       const n = +el.dataset.step;
       if (n === 1) el.classList.add(hasDesigner ? "done" : "active");
       else if (n === 2) el.classList.add(hasFiles ? "done" : (hasDesigner ? "active" : ""));
-      else if (n === 3) el.classList.add(allNamesOk && catsOk ? "done" : (hasFiles ? "active" : ""));
+      else if (n === 3) el.classList.add(allNamesOk && catsOk && seoOk ? "done" : (hasFiles ? "active" : ""));
       else if (n === 4) el.classList.add(canGenerate() ? "active" : "");
     });
 
@@ -251,7 +284,7 @@
     setChk("chk-files", hasFiles);
     setChk("chk-names", allNamesOk);
     setChk("chk-cats", catsOk && hasFiles);
-    // PNG visual check — always "wait" (user responsibility)
+    setChk("chk-seo", seoOk);
     const pngIcon = document.getElementById("chk-png");
     if (hasFiles) {
       pngIcon.className = "check-icon wait";
@@ -278,7 +311,9 @@
   function canGenerate() {
     if (!designerInput.value.trim()) return false;
     if (stickers.length === 0) return false;
-    return stickers.every(s => validateName(s.name, s.id).ok);
+    return stickers.every(s =>
+      validateName(s.name, s.id).ok && (s.note || "").trim().length > 0
+    );
   }
 
   // ═══════════════════════════════════════════════════
@@ -319,6 +354,7 @@
           name: baseName,
           cats: [],
           note: "",
+          geektoryNote: "",
           preview: ev.target.result
         });
         renderStickers();
@@ -364,24 +400,30 @@
             <div class="name-status ${v.ok ? "ok" : "error"}">${v.msg}</div>
           </div>
           <div class="field-row">
-            <label class="field-label">دسته‌ها (تا ۸ تا · از لیست سایت)</label>
-            <div class="cat-picker" data-picker="${s.id}">
-              <div class="cat-selected" data-chips="${s.id}"></div>
-              <input type="text" class="cat-search-input" data-catsearch="${s.id}"
-                placeholder="جستجو و انتخاب دسته…" autocomplete="off" />
-              <div class="cat-dropdown" data-drop="${s.id}"></div>
-              <div class="cat-hint" data-cathint="${s.id}"></div>
+            <label class="field-label">دسته‌ها (تا ۸ تا · از لیست رسمی سایت)</label>
+            <button type="button" class="cat-trigger" data-opencats="${s.id}">
+              <div class="cat-trigger-left" data-catpreview="${s.id}">
+                ${renderCatPreviewHTML(s)}
+              </div>
+              <span class="cat-trigger-arrow">‹</span>
+            </button>
+            <div class="cat-hint" style="font-size:12px;color:var(--color-slate);margin-top:6px;">
+              ${s.cats.length === 0
+                ? "اگر دسته مناسب پیدا نکردی خالی بگذار و تو یادداشت بنویس."
+                : s.cats.length + " از ۸ دسته انتخاب شده"}
             </div>
           </div>
           <div class="field-row">
-            <label class="field-label">یادداشت (اختیاری — برای سئو)</label>
-            <textarea data-note="${s.id}" placeholder="مثلاً: تانجیرو از انیمه‌ی دیمن اسلیر با گوشواره‌ی هانافودا">${escapeHtml(s.note)}</textarea>
+            <label class="field-label">یادداشت سئو <span style="color:var(--color-error)">*</span> (اجباری)</label>
+            <textarea data-note="${s.id}" class="${(s.note||'').trim() ? '' : 'error'}" placeholder="مثلاً: تانجیرو از انیمه‌ی دیمن اسلیر با گوشواره‌ی هانافودا" required>${escapeHtml(s.note)}</textarea>
+          </div>
+          <div class="field-row">
+            <label class="field-label">یادداشت برای گیکتوری (اختیاری)</label>
+            <textarea data-gnote="${s.id}" placeholder="مثلاً: رنگ استروک باید کد 4F091D باشد">${escapeHtml(s.geektoryNote || "")}</textarea>
           </div>
         </div>
       `;
       stickerList.appendChild(card);
-      renderChips(s.id);
-      updateCatHint(s.id);
     });
 
     // Bind events
@@ -412,142 +454,197 @@
       ta.addEventListener("input", () => {
         const s = stickers.find(x => x.id === ta.dataset.note);
         if (s) s.note = ta.value;
+        ta.classList.toggle("error", !(ta.value || "").trim());
+        updateProgress();
       });
     });
-    stickerList.querySelectorAll("[data-catsearch]").forEach(inp => {
-      const id = inp.dataset.catsearch;
-      const drop = stickerList.querySelector(`[data-drop="${id}"]`);
-      inp.addEventListener("focus", () => openDropdown(id, inp.value));
-      inp.addEventListener("input", () => openDropdown(id, inp.value));
-      inp.addEventListener("blur", () => {
-        setTimeout(() => drop.classList.remove("open"), 180);
+    stickerList.querySelectorAll("[data-gnote]").forEach(ta => {
+      ta.addEventListener("input", () => {
+        const s = stickers.find(x => x.id === ta.dataset.gnote);
+        if (s) s.geektoryNote = ta.value;
       });
     });
-  }
-
-  function renderChips(id) {
-    const s = stickers.find(x => x.id === id);
-    const wrap = stickerList.querySelector(`[data-chips="${id}"]`);
-    if (!wrap || !s) return;
-    wrap.innerHTML = s.cats.map(c =>
-      `<span class="cat-chip">${escapeHtml(c)}<button type="button" data-rmcat="${id}" data-cat="${escapeAttr(c)}">×</button></span>`
-    ).join("");
-    wrap.querySelectorAll("[data-rmcat]").forEach(btn => {
-      btn.addEventListener("mousedown", e => {
-        e.preventDefault();
-        const st = stickers.find(x => x.id === btn.dataset.rmcat);
-        if (st) {
-          st.cats = st.cats.filter(c => c !== btn.dataset.cat);
-          renderChips(id);
-          updateCatHint(id);
-          updateProgress();
-        }
-      });
+    stickerList.querySelectorAll("[data-opencats]").forEach(btn => {
+      btn.addEventListener("click", () => openCatModal(btn.dataset.opencats));
     });
   }
 
-  function updateCatHint(id) {
-    const s = stickers.find(x => x.id === id);
-    const el = stickerList.querySelector(`[data-cathint="${id}"]`);
-    if (!el || !s) return;
-    if (s.cats.length === 0) {
-      el.textContent = "اگر دسته مناسب پیدا نکردی خالی بگذار و تو یادداشت بنویس.";
-    } else {
-      el.textContent = s.cats.length + " از ۸ دسته انتخاب شده";
+  function renderCatPreviewHTML(s) {
+    if (!s.cats.length) {
+      return '<span class="cat-trigger-placeholder">کلیک کن و دسته انتخاب کن…</span>';
     }
-  }
-
-  function openDropdown(id, query) {
-    const s = stickers.find(x => x.id === id);
-    const drop = stickerList.querySelector(`[data-drop="${id}"]`);
-    if (!s || !drop) return;
-    const q = (query || "").trim().toLowerCase();
-    const available = CATEGORIES.filter(c =>
-      !s.cats.includes(c) && (!q || c.toLowerCase().includes(q))
-    ).slice(0, 40);
-    if (available.length === 0) {
-      drop.innerHTML = '<div class="cat-option disabled">موردی پیدا نشد</div>';
-    } else {
-      drop.innerHTML = available.map(c =>
-        `<div class="cat-option" data-addcat="${id}" data-cat="${escapeAttr(c)}">${escapeHtml(c)}</div>`
-      ).join("");
-      drop.querySelectorAll("[data-addcat]").forEach(opt => {
-        opt.addEventListener("mousedown", e => {
-          e.preventDefault();
-          const st = stickers.find(x => x.id === opt.dataset.addcat);
-          if (st && st.cats.length < 8 && !st.cats.includes(opt.dataset.cat)) {
-            st.cats.push(opt.dataset.cat);
-            renderChips(id);
-            updateCatHint(id);
-            updateProgress();
-            const searchInp = stickerList.querySelector(`[data-catsearch="${id}"]`);
-            if (searchInp) { searchInp.value = ""; searchInp.focus(); }
-            openDropdown(id, "");
-          } else if (st && st.cats.length >= 8) {
-            toast("حداکثر ۸ دسته");
-          }
-        });
-      });
+    const shown = s.cats.slice(0, 3);
+    let html = shown.map(c => `<span class="cat-mini-chip">${escapeHtml(c)}</span>`).join("");
+    if (s.cats.length > 3) {
+      html += `<span class="cat-mini-more">+${s.cats.length - 3}</span>`;
     }
-    drop.classList.add("open");
+    return html;
   }
 
-  // ═══════════════════════════════════════════════════
-  // Generate Excel + ZIP
-  // ═══════════════════════════════════════════════════
-  function buildExcel(designerName) {
-    const wb = XLSX.utils.book_new();
+  // ── Category Modal ──
+  let modalStickerId = null;
+  let modalTempCats = [];
 
-    // --- Sheet: استیکرها ---
-    const header = [
-      "نام استیکر (مثل اسم فایل PNG، بدون .png)",
-      "دسته‌ها (چند تا را با «،» جدا کن)",
-      "یادداشت (این استیکر چیست؟)",
-      "بررسی دسته‌ها (خودکار، دست نزن)"
-    ];
-    const rows = [header];
-    stickers.forEach((s, i) => {
-      const catStr = s.cats.join("، ");
-      // Pre-validate categories for column D
-      let status = "";
-      if (catStr.trim()) {
-        const invalid = s.cats.filter(c => !CATEGORY_SET.has(c));
-        status = invalid.length
-          ? "✗ این دسته تو سایت نیست: " + invalid[0]
-          : "✓ درست";
+  const catModal = document.getElementById("catModal");
+  const catModalSearch = document.getElementById("catModalSearch");
+  const catModalGrid = document.getElementById("catModalGrid");
+  const catModalSelected = document.getElementById("catModalSelected");
+  const catModalCount = document.getElementById("catModalCount");
+  const catModalFiltered = document.getElementById("catModalFiltered");
+
+  function openCatModal(stickerId) {
+    const s = stickers.find(x => x.id === stickerId);
+    if (!s) return;
+    modalStickerId = stickerId;
+    modalTempCats = [...s.cats];
+    catModalSearch.value = "";
+    renderModalUI();
+    catModal.classList.add("open");
+    catModal.setAttribute("aria-hidden", "false");
+    document.body.style.overflow = "hidden";
+    setTimeout(() => catModalSearch.focus(), 280);
+  }
+
+  function closeCatModal(apply) {
+    if (apply && modalStickerId) {
+      const s = stickers.find(x => x.id === modalStickerId);
+      if (s) {
+        s.cats = [...modalTempCats];
+        renderStickers();
+        updateProgress();
       }
-      rows.push([s.name.trim(), catStr, s.note.trim(), status]);
+    }
+    catModal.classList.remove("open");
+    catModal.setAttribute("aria-hidden", "true");
+    document.body.style.overflow = "";
+    modalStickerId = null;
+  }
+
+  function renderModalUI() {
+    // Selected chips
+    catModalSelected.innerHTML = modalTempCats.map(c =>
+      `<span class="modal-chip">${escapeHtml(c)}<button type="button" data-rm="${escapeAttr(c)}" aria-label="حذف">×</button></span>`
+    ).join("");
+    catModalSelected.querySelectorAll("[data-rm]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        modalTempCats = modalTempCats.filter(c => c !== btn.dataset.rm);
+        renderModalUI();
+      });
     });
-    // pad a few empty rows like template
-    for (let i = 0; i < 5; i++) rows.push(["", "", "", ""]);
 
-    const wsStickers = XLSX.utils.aoa_to_sheet(rows);
-    wsStickers["!cols"] = [{ wch: 36 }, { wch: 40 }, { wch: 50 }, { wch: 40 }];
-    XLSX.utils.book_append_sheet(wb, wsStickers, "استیکرها");
+    // Count
+    const n = modalTempCats.length;
+    catModalCount.innerHTML = n >= 8
+      ? `<span class="limit-warn"><strong>${n}</strong> از ۸ — حداکثر رسیده</span>`
+      : `<strong>${n}</strong> از ۸ انتخاب شده`;
 
-    // --- Sheet: دسته‌های سایت ---
-    const catRows = [["دسته (همین را بنویس)"]];
-    CATEGORIES.forEach(c => catRows.push([c]));
-    const wsCats = XLSX.utils.aoa_to_sheet(catRows);
-    wsCats["!cols"] = [{ wch: 40 }];
-    XLSX.utils.book_append_sheet(wb, wsCats, "دسته‌های سایت");
+    // Grid
+    const q = catModalSearch.value.trim().toLowerCase();
+    const filtered = q
+      ? CATEGORIES.filter(c => c.toLowerCase().includes(q))
+      : CATEGORIES;
 
-    // --- Sheet: راهنما ---
-    const guideRows = [
-      ["هر استیکر یک ردیف."],
-      ["نام استیکر: دقیقاً مثل اسم فایل PNG (بدون .png)."],
-      ["دسته‌ها: همه‌ی دسته‌های این استیکر را تو همین یک خونه بنویس و با «،» جدا کن (مثلاً: Demon Slayer، کیوت‌طوری)."],
-      ["ستون «بررسی دسته‌ها» خودش می‌گوید درست نوشتی یا نه: سبز = درست، قرمز = یکی از دسته‌ها تو سایت نیست."],
-      ["اسم دسته‌ها را از برگه‌ی «دسته‌های سایت» بردار."],
-      ["متن فارسی روی استیکر = «متن فارسی»؛ متن انگلیسی = «Text»."],
-      ["دو ردیف نمونه را پاک کن (در این فایل تولیدشده نمونه‌ای نیست)."],
-      ["اسم این فایل و اسم پوشه = نام طراح."]
-    ];
-    const wsGuide = XLSX.utils.aoa_to_sheet(guideRows);
-    wsGuide["!cols"] = [{ wch: 90 }];
-    XLSX.utils.book_append_sheet(wb, wsGuide, "راهنما");
+    catModalFiltered.textContent = q
+      ? `${filtered.length} نتیجه`
+      : `${CATEGORIES.length} دسته`;
 
-    return XLSX.write(wb, { bookType: "xlsx", type: "array" });
+    if (filtered.length === 0) {
+      catModalGrid.innerHTML = '<div class="modal-empty">دسته‌ای با این نام پیدا نشد</div>';
+      return;
+    }
+
+    const atLimit = modalTempCats.length >= 8;
+    catModalGrid.innerHTML = filtered.map(c => {
+      const sel = modalTempCats.includes(c);
+      const dis = !sel && atLimit;
+      return `<button type="button" class="modal-tag${sel ? " selected" : ""}${dis ? " disabled" : ""}" data-toggle="${escapeAttr(c)}">${escapeHtml(c)}</button>`;
+    }).join("");
+
+    catModalGrid.querySelectorAll("[data-toggle]").forEach(tag => {
+      tag.addEventListener("click", () => {
+        const cat = tag.dataset.toggle;
+        if (modalTempCats.includes(cat)) {
+          modalTempCats = modalTempCats.filter(c => c !== cat);
+        } else if (modalTempCats.length < 8) {
+          modalTempCats.push(cat);
+        } else {
+          toast("حداکثر ۸ دسته می‌توانی انتخاب کنی");
+          return;
+        }
+        renderModalUI();
+      });
+    });
+  }
+
+  catModalSearch.addEventListener("input", () => renderModalUI());
+  document.getElementById("catModalClose").addEventListener("click", () => closeCatModal(false));
+  document.getElementById("catModalDone").addEventListener("click", () => closeCatModal(true));
+  document.getElementById("catModalClear").addEventListener("click", () => {
+    modalTempCats = [];
+    renderModalUI();
+  });
+  catModal.addEventListener("click", e => {
+    if (e.target === catModal) closeCatModal(false);
+  });
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && catModal.classList.contains("open")) closeCatModal(false);
+  });
+
+  // ═══════════════════════════════════════════════════
+  // Generate Excel from official template + ZIP
+  // ═══════════════════════════════════════════════════
+
+  /** Load قالب-اکسل-طراح.xlsx and fill only A/B/C; keep D formulas + other sheets intact */
+  async function buildExcelFromTemplate() {
+    const res = await fetch("قالب-اکسل-طراح.xlsx");
+    if (!res.ok) throw new Error("قالب اکسل پیدا نشد (قالب-اکسل-طراح.xlsx)");
+    const buf = await res.arrayBuffer();
+
+    // Keep formulas as formulas (not calculated values)
+    const wb = XLSX.read(buf, { type: "array", cellFormula: true, cellStyles: true });
+
+    // Find sticker sheet (name may contain ZWNJ)
+    const sheetName = wb.SheetNames.find(n => n.replace(/\u200c/g, "") === "استیکرها") || wb.SheetNames[0];
+    const ws = wb.Sheets[sheetName];
+
+    // Clear sample / previous data in A,B,C for rows 2..300 — do NOT touch D (formulas)
+    for (let r = 2; r <= 300; r++) {
+      delete ws[XLSX.utils.encode_cell({ r: r - 1, c: 0 })]; // A
+      delete ws[XLSX.utils.encode_cell({ r: r - 1, c: 1 })]; // B
+      delete ws[XLSX.utils.encode_cell({ r: r - 1, c: 2 })]; // C
+      // D stays (formula already in template)
+    }
+
+    // Write sticker data starting at row 2
+    stickers.forEach((s, i) => {
+      const row = i + 2; // 1-based Excel row
+      const r0 = row - 1; // 0-based for SheetJS
+      const catStr = s.cats.join("، ");
+
+      const cellA = XLSX.utils.encode_cell({ r: r0, c: 0 });
+      const cellB = XLSX.utils.encode_cell({ r: r0, c: 1 });
+      const cellC = XLSX.utils.encode_cell({ r: r0, c: 2 });
+
+      ws[cellA] = { t: "s", v: s.name.trim() };
+      ws[cellB] = { t: "s", v: catStr };
+      ws[cellC] = { t: "s", v: (s.note || "").trim() };
+
+      // Ensure D still has the validation formula for this row (in case template row was sparse)
+      const cellD = XLSX.utils.encode_cell({ r: r0, c: 3 });
+      if (!ws[cellD] || !ws[cellD].f) {
+        // Same formula pattern as template, with correct row number
+        ws[cellD] = {
+          t: "s",
+          f: `IF(TRIM($B${row})="","",IFERROR("✗ این دسته تو سایت نیست: "&TRIM(MID(SUBSTITUTE(SUBSTITUTE($B${row},",","،"),"،",REPT(" ",200)),(MATCH(1,INDEX((TRIM(MID(SUBSTITUTE(SUBSTITUTE($B${row},",","،"),"،",REPT(" ",200)),(ROW($1:$8)-1)*200+1,200))<>"")*(COUNTIF('دسته‌های سایت'!$A$2:$A$338,TRIM(MID(SUBSTITUTE(SUBSTITUTE($B${row},",","،"),"،",REPT(" ",200)),(ROW($1:$8)-1)*200+1,200)))=0),0),0)-1)*200+1,200)),"✓ درست"))`
+        };
+      }
+    });
+
+    // Update sheet range so Excel sees all written rows
+    const lastRow = Math.max(300, stickers.length + 1);
+    ws["!ref"] = `A1:D${lastRow}`;
+
+    return XLSX.write(wb, { bookType: "xlsx", type: "array", cellStyles: true });
   }
 
   async function generateZip() {
@@ -564,14 +661,22 @@
       const zip = new JSZip();
       const folder = zip.folder(designer);
 
-      // Excel named after designer
-      const excelData = buildExcel(designer);
+      // Official template, filled with designer data only
+      const excelData = await buildExcelFromTemplate();
       folder.file(designer + ".xlsx", excelData);
 
-      // PNGs with final names
+      // PNGs with final names (exactly as entered)
       for (const s of stickers) {
         const safeName = s.name.trim() + ".png";
         folder.file(safeName, s.file);
+      }
+
+      // Geektory notes as separate text file (only stickers that have a note)
+      const gNotes = stickers
+        .filter(s => (s.geektoryNote || "").trim())
+        .map(s => s.name.trim() + " : " + s.geektoryNote.trim());
+      if (gNotes.length > 0) {
+        folder.file("یادداشت-گیکتوری.txt", gNotes.join("\n") + "\n");
       }
 
       const blob = await zip.generateAsync({ type: "blob" });
@@ -584,7 +689,7 @@
       a.remove();
       URL.revokeObjectURL(url);
 
-      toast("ZIP آماده شد و دانلود شروع شد ✓");
+      toast("ZIP آماده شد — اکسل از روی قالب رسمی پر شد ✓");
     } catch (err) {
       console.error(err);
       toast("خطا در ساخت فایل: " + (err.message || err));
