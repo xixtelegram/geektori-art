@@ -6,8 +6,8 @@
   <title>ابزار تحویل استیکر · گیکتوری</title>
   <meta name="description" content="ابزار تحویل استیکر برای طراحان گیکتوری — آپلود PNG، انتخاب دسته، تولید اکسل و ZIP" />
   <link rel="stylesheet" href="style.css" />
-  <!-- SheetJS for Excel generation -->
-  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <!-- ExcelJS: preserves template styles, formulas, validations, CF -->
+  <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
   <!-- JSZip for ZIP packaging -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
@@ -491,54 +491,68 @@
   const catModalSelected = document.getElementById("catModalSelected");
   const catModalCount = document.getElementById("catModalCount");
   const catModalFiltered = document.getElementById("catModalFiltered");
+  const catModalPanel = catModal.querySelector(".modal");
 
   function openCatModal(stickerId) {
     const s = stickers.find(x => x.id === stickerId);
     if (!s) return;
     modalStickerId = stickerId;
-    modalTempCats = [...s.cats];
+    modalTempCats = s.cats.slice();
     catModalSearch.value = "";
     renderModalUI();
     catModal.classList.add("open");
     catModal.setAttribute("aria-hidden", "false");
     document.body.style.overflow = "hidden";
-    setTimeout(() => catModalSearch.focus(), 280);
+    setTimeout(() => catModalSearch.focus(), 300);
   }
 
   function closeCatModal(apply) {
-    if (apply && modalStickerId) {
-      const s = stickers.find(x => x.id === modalStickerId);
-      if (s) {
-        s.cats = [...modalTempCats];
-        renderStickers();
-        updateProgress();
-      }
-    }
+    const id = modalStickerId;
+    const selected = modalTempCats.slice();
     catModal.classList.remove("open");
     catModal.setAttribute("aria-hidden", "true");
     document.body.style.overflow = "";
     modalStickerId = null;
+
+    if (apply && id) {
+      const s = stickers.find(x => x.id === id);
+      if (s) {
+        s.cats = selected;
+        renderStickers();
+        updateProgress();
+        toast(selected.length ? selected.length + " دسته ذخیره شد" : "دسته‌ها پاک شد");
+      }
+    }
+  }
+
+  function toggleModalCat(cat) {
+    const idx = modalTempCats.indexOf(cat);
+    if (idx >= 0) {
+      modalTempCats.splice(idx, 1);
+    } else if (modalTempCats.length < 8) {
+      modalTempCats.push(cat);
+    } else {
+      toast("حداکثر ۸ دسته می‌توانی انتخاب کنی");
+      return;
+    }
+    renderModalUI();
   }
 
   function renderModalUI() {
     // Selected chips
-    catModalSelected.innerHTML = modalTempCats.map(c =>
-      `<span class="modal-chip">${escapeHtml(c)}<button type="button" data-rm="${escapeAttr(c)}" aria-label="حذف">×</button></span>`
-    ).join("");
-    catModalSelected.querySelectorAll("[data-rm]").forEach(btn => {
-      btn.addEventListener("click", () => {
-        modalTempCats = modalTempCats.filter(c => c !== btn.dataset.rm);
-        renderModalUI();
-      });
-    });
+    if (modalTempCats.length === 0) {
+      catModalSelected.innerHTML = "";
+    } else {
+      catModalSelected.innerHTML = modalTempCats.map((c, i) =>
+        `<span class="modal-chip">${escapeHtml(c)}<button type="button" data-rm-idx="${i}" aria-label="حذف">×</button></span>`
+      ).join("");
+    }
 
-    // Count
     const n = modalTempCats.length;
     catModalCount.innerHTML = n >= 8
       ? `<span class="limit-warn"><strong>${n}</strong> از ۸ — حداکثر رسیده</span>`
       : `<strong>${n}</strong> از ۸ انتخاب شده`;
 
-    // Grid
     const q = catModalSearch.value.trim().toLowerCase();
     const filtered = q
       ? CATEGORIES.filter(c => c.toLowerCase().includes(q))
@@ -554,97 +568,128 @@
     }
 
     const atLimit = modalTempCats.length >= 8;
+    // Use index into CATEGORIES to avoid special-char dataset issues
     catModalGrid.innerHTML = filtered.map(c => {
       const sel = modalTempCats.includes(c);
       const dis = !sel && atLimit;
-      return `<button type="button" class="modal-tag${sel ? " selected" : ""}${dis ? " disabled" : ""}" data-toggle="${escapeAttr(c)}">${escapeHtml(c)}</button>`;
+      const idx = CATEGORIES.indexOf(c);
+      return `<button type="button" class="modal-tag${sel ? " selected" : ""}${dis ? " disabled" : ""}" data-cat-idx="${idx}">${escapeHtml(c)}</button>`;
     }).join("");
-
-    catModalGrid.querySelectorAll("[data-toggle]").forEach(tag => {
-      tag.addEventListener("click", () => {
-        const cat = tag.dataset.toggle;
-        if (modalTempCats.includes(cat)) {
-          modalTempCats = modalTempCats.filter(c => c !== cat);
-        } else if (modalTempCats.length < 8) {
-          modalTempCats.push(cat);
-        } else {
-          toast("حداکثر ۸ دسته می‌توانی انتخاب کنی");
-          return;
-        }
-        renderModalUI();
-      });
-    });
   }
 
+  // Event delegation — reliable for dynamically rendered tags/chips
+  catModalSelected.addEventListener("click", e => {
+    const btn = e.target.closest("[data-rm-idx]");
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const i = parseInt(btn.getAttribute("data-rm-idx"), 10);
+    if (!isNaN(i)) {
+      modalTempCats.splice(i, 1);
+      renderModalUI();
+    }
+  });
+
+  catModalGrid.addEventListener("click", e => {
+    const tag = e.target.closest("[data-cat-idx]");
+    if (!tag || tag.classList.contains("disabled")) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const idx = parseInt(tag.getAttribute("data-cat-idx"), 10);
+    if (!isNaN(idx) && CATEGORIES[idx] != null) {
+      toggleModalCat(CATEGORIES[idx]);
+    }
+  });
+
   catModalSearch.addEventListener("input", () => renderModalUI());
-  document.getElementById("catModalClose").addEventListener("click", () => closeCatModal(false));
-  document.getElementById("catModalDone").addEventListener("click", () => closeCatModal(true));
-  document.getElementById("catModalClear").addEventListener("click", () => {
+
+  document.getElementById("catModalClose").addEventListener("click", e => {
+    e.preventDefault();
+    e.stopPropagation();
+    closeCatModal(false);
+  });
+
+  document.getElementById("catModalDone").addEventListener("click", e => {
+    e.preventDefault();
+    e.stopPropagation();
+    closeCatModal(true);
+  });
+
+  document.getElementById("catModalClear").addEventListener("click", e => {
+    e.preventDefault();
+    e.stopPropagation();
     modalTempCats = [];
     renderModalUI();
   });
+
+  // Backdrop click closes without apply; clicks inside panel do nothing extra
   catModal.addEventListener("click", e => {
     if (e.target === catModal) closeCatModal(false);
   });
+  if (catModalPanel) {
+    catModalPanel.addEventListener("click", e => e.stopPropagation());
+  }
+
   document.addEventListener("keydown", e => {
     if (e.key === "Escape" && catModal.classList.contains("open")) closeCatModal(false);
   });
 
   // ═══════════════════════════════════════════════════
   // Generate Excel from official template + ZIP
+  // Uses ExcelJS so styles, formulas, CF, validations, RTL stay intact
   // ═══════════════════════════════════════════════════
 
-  /** Load قالب-اکسل-طراح.xlsx and fill only A/B/C; keep D formulas + other sheets intact */
   async function buildExcelFromTemplate() {
     const res = await fetch("قالب-اکسل-طراح.xlsx");
     if (!res.ok) throw new Error("قالب اکسل پیدا نشد (قالب-اکسل-طراح.xlsx)");
     const buf = await res.arrayBuffer();
 
-    // Keep formulas as formulas (not calculated values)
-    const wb = XLSX.read(buf, { type: "array", cellFormula: true, cellStyles: true });
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buf);
 
-    // Find sticker sheet (name may contain ZWNJ)
-    const sheetName = wb.SheetNames.find(n => n.replace(/\u200c/g, "") === "استیکرها") || wb.SheetNames[0];
-    const ws = wb.Sheets[sheetName];
+    // Find sticker sheet by normalized name
+    let ws = null;
+    workbook.eachSheet((sheet) => {
+      const n = (sheet.name || "").replace(/\u200c/g, "");
+      if (n === "استیکرها") ws = sheet;
+    });
+    if (!ws) ws = workbook.worksheets[0];
 
-    // Clear sample / previous data in A,B,C for rows 2..300 — do NOT touch D (formulas)
+    // Clear sample data in A/B/C only (rows 2–300). Never touch column D (formulas).
     for (let r = 2; r <= 300; r++) {
-      delete ws[XLSX.utils.encode_cell({ r: r - 1, c: 0 })]; // A
-      delete ws[XLSX.utils.encode_cell({ r: r - 1, c: 1 })]; // B
-      delete ws[XLSX.utils.encode_cell({ r: r - 1, c: 2 })]; // C
-      // D stays (formula already in template)
+      const a = ws.getCell(r, 1);
+      const b = ws.getCell(r, 2);
+      const c = ws.getCell(r, 3);
+      a.value = null;
+      b.value = null;
+      c.value = null;
+      // Reset gray sample font to default black for empty rows
+      a.font = { color: { argb: "FF000000" } };
+      b.font = { color: { argb: "FF000000" } };
+      c.font = { color: { argb: "FF000000" } };
     }
 
-    // Write sticker data starting at row 2
+    // Fill designer data starting at row 2
     stickers.forEach((s, i) => {
-      const row = i + 2; // 1-based Excel row
-      const r0 = row - 1; // 0-based for SheetJS
+      const r = i + 2;
       const catStr = s.cats.join("، ");
 
-      const cellA = XLSX.utils.encode_cell({ r: r0, c: 0 });
-      const cellB = XLSX.utils.encode_cell({ r: r0, c: 1 });
-      const cellC = XLSX.utils.encode_cell({ r: r0, c: 2 });
+      const cellA = ws.getCell(r, 1);
+      const cellB = ws.getCell(r, 2);
+      const cellC = ws.getCell(r, 3);
 
-      ws[cellA] = { t: "s", v: s.name.trim() };
-      ws[cellB] = { t: "s", v: catStr };
-      ws[cellC] = { t: "s", v: (s.note || "").trim() };
+      cellA.value = s.name.trim();
+      cellB.value = catStr;
+      cellC.value = (s.note || "").trim();
 
-      // Ensure D still has the validation formula for this row (in case template row was sparse)
-      const cellD = XLSX.utils.encode_cell({ r: r0, c: 3 });
-      if (!ws[cellD] || !ws[cellD].f) {
-        // Same formula pattern as template, with correct row number
-        ws[cellD] = {
-          t: "s",
-          f: `IF(TRIM($B${row})="","",IFERROR("✗ این دسته تو سایت نیست: "&TRIM(MID(SUBSTITUTE(SUBSTITUTE($B${row},",","،"),"،",REPT(" ",200)),(MATCH(1,INDEX((TRIM(MID(SUBSTITUTE(SUBSTITUTE($B${row},",","،"),"،",REPT(" ",200)),(ROW($1:$8)-1)*200+1,200))<>"")*(COUNTIF('دسته‌های سایت'!$A$2:$A$338,TRIM(MID(SUBSTITUTE(SUBSTITUTE($B${row},",","،"),"،",REPT(" ",200)),(ROW($1:$8)-1)*200+1,200)))=0),0),0)-1)*200+1,200)),"✓ درست"))`
-        };
-      }
+      // Real data uses normal (black) text — samples were gray
+      cellA.font = { color: { argb: "FF000000" } };
+      cellB.font = { color: { argb: "FF000000" } };
+      cellC.font = { color: { argb: "FF000000" } };
     });
 
-    // Update sheet range so Excel sees all written rows
-    const lastRow = Math.max(300, stickers.length + 1);
-    ws["!ref"] = `A1:D${lastRow}`;
-
-    return XLSX.write(wb, { bookType: "xlsx", type: "array", cellStyles: true });
+    const out = await workbook.xlsx.writeBuffer();
+    return out;
   }
 
   async function generateZip() {
